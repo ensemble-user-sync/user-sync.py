@@ -1,5 +1,7 @@
 # user-sync.py
 
+TEST
+
 Application for synchronizing customer directories with the
 Adobe Enterprise Admin Console via the
 [User Management API](https://www.adobe.io/products/usermanagement/docs/gettingstarted.html)
