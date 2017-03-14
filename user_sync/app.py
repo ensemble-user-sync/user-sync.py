@@ -75,6 +75,15 @@ def process_args():
     parser.add_argument('-d', '--remove-list',
                         help='specifies the file containing the list of users to be removed. Users on this list are removeFromOrg\'ed on the Adobe side.',
                         metavar='input_path', dest='remove_list_input_path')
+    parser.add_argument('--delete-nonexistent-users',
+                        help='Causes the user sync tool to remove users that exist on the Adobe side if they are not in the customer side AD. If the account is an Adobe account, it is remove from org\'d.',
+                        action='store_true', dest='delete_nonexistent_users')
+    parser.add_argument('--generate-delete-list',
+                        help='processing similar to --delete-nonexistent-users except that rather than performing deletions, a file is generated (with the given pathname) listing users who would be deleted. This file can then be given in the --delete-list argument in a subsequent run.',
+                        metavar='output_path', dest='delete_list_output_path')
+    parser.add_argument('--delete-list',
+                        help='specifies the file containing the list of users to be removed. Users on this list are removeFromOrg\'ed on the Adobe side.',
+                        metavar='input_path', dest='delete_list_input_path')
     return parser.parse_args()
 
 def init_console_log():
@@ -230,14 +239,50 @@ def create_config_loader_options(args):
         remove_user_key_list = user_sync.rules.RuleProcessor.read_remove_list(remove_list_input_path, logger = logger)
         logger.info('Total users in remove list: %d', len(remove_user_key_list))
         config_options['remove_user_key_list'] = remove_user_key_list
-         
+
+    delete_list_input_path = args.delete_list_input_path
+    if (delete_list_input_path != None):
+        logger.info('Reading delete list from: %s', delete_list_input_path)
+        delete_user_key_list = user_sync.rules.RuleProcessor.read_remove_list(delete_list_input_path, logger = logger)
+        logger.info('Total users in delete list: %d', len(delete_user_key_list))
+        config_options['delete_user_key_list'] = delete_user_key_list
+    
+    # keep track of the number of "remove user" type commands the user has entered
+    remove_command_count = 0
+
+    # --remove-nonexistent-users    
     config_options['remove_list_output_path'] = remove_list_output_path = args.remove_list_output_path
     remove_nonexistent_users = args.remove_nonexistent_users
-    if (remove_nonexistent_users and remove_list_output_path):
-        remove_nonexistent_users = False
-        logger.warn('--remove-nonexistent-users ignored when --generate-remove-list is specified')    
+    if remove_nonexistent_users:
+        remove_command_count += 1
+        if remove_list_output_path:
+            remove_nonexistent_users = False
+            logger.warn('--remove-nonexistent-users ignored when --generate-remove-list is specified')
     config_options['remove_nonexistent_users'] = remove_nonexistent_users
-                    
+
+    # --delete-nonexistent-users
+    config_options['delete_list_output_path'] = delete_list_output_path = args.delete_list_output_path
+    delete_nonexistent_users = args.delete_nonexistent_users
+    if delete_nonexistent_users:
+        remove_command_count += 1
+        if delete_list_output_path:
+            delete_nonexistent_users = False
+            logger.warn('--delete-nonexistent-users ignored when --generate-delete-list is specified')
+    config_options['delete_nonexistent_users'] = delete_nonexistent_users
+
+    # --remove-entitlements-for-nonexistent-users
+    remove_entitlements_list_input_path = args.remove_entitlements_list_input_path
+    if remove_entitlements_list_input_path != None:
+        remove_command_count += 1
+        logger.info('Reading remove entitlements list from: %s', remove_entitlements_list_input_path)
+        remove_user_entitlements_key_list = user_sync.rules.RuleProcessor.read_remove_list(remove_entitlements_list_input_path, logger = logger)
+        logger.info('Total users in remove list: %d', len(remove_user_entitlements_key_list))
+        config_options['remove_user_entitlements_key_list'] = remove_user_entitlements_key_list
+
+    # ensure the user has only entered one "remove user" type command.    
+    if remove_command_count > 1:
+        raise user_sync.error.AssertionException("You may specify only one of --remove-nonexistent-users, --delete-nonexistent-users, or --remove-entitlements-for-nonexistent-users")
+    
     source_filter_args = args.source_filter_args
     if (source_filter_args != None):
         source_filter_args_separator_index = source_filter_args.find(':')

@@ -24,7 +24,6 @@ import logging
 import user_sync.connector.dashboard
 import user_sync.helper
 import user_sync.identity_type
-from CodeWarrior.CodeWarrior_suite import target
 
 import umapi_client
 
@@ -50,6 +49,7 @@ class RuleProcessor(object):
             'update_user_info': True,
             
             'remove_user_key_list': None,
+            'delete_user_key_list': None,
             'remove_list_output_path': None,
             'remove_nonexistent_users': False,
             'default_country_code': None,
@@ -69,8 +69,14 @@ class RuleProcessor(object):
         remove_user_key_list = options['remove_user_key_list']
         remove_user_key_list = set(remove_user_key_list) if (remove_user_key_list != None) else set()
         self.remove_user_key_list = remove_user_key_list
+
+        delete_user_key_list = options['delete_user_key_list']
+        delete_user_key_list = set(delete_user_key_list) if (delete_user_key_list != None) else set()
+        self.delete_user_key_list = delete_user_key_list
         
-        self.need_to_process_orphaned_dashboard_users = options['remove_list_output_path'] != None or options['remove_nonexistent_users']
+        self.need_to_process_remove_users = options['remove_list_output_path'] != None or options['remove_nonexistent_users']
+        self.need_to_process_delete_users = options['delete_list_output_path'] != None or options['delete_nonexistent_users']
+        self.need_to_process_orphaned_dashboard_users = self.need_to_process_remove_users or self.need_to_process_delete_users
                 
         self.logger = logger = logging.getLogger('processor')
 
@@ -105,7 +111,8 @@ class RuleProcessor(object):
 
         self.prepare_organization_infos()
 
-        if (directory_connector != None):
+        # build org/user/group map
+        if directory_connector != None:
             load_directory_stats = user_sync.helper.JobStats("Load from Directory", divider = "-")
             load_directory_stats.log_start(logger)
             self.read_desired_user_groups(directory_groups, directory_connector)
@@ -114,13 +121,14 @@ class RuleProcessor(object):
         else:
             should_sync_dashboard_users = False
         
+        # do the sync
         dashboard_stats = user_sync.helper.JobStats("Sync Dashboard", divider = "-")
         dashboard_stats.log_start(logger)
-        if (should_sync_dashboard_users):
+        if should_sync_dashboard_users:
             self.process_dashboard_users(dashboard_connectors)
             if self.need_to_process_orphaned_dashboard_users:
-                self.process_orphaned_dashboard_users()                            
-        self.clean_dashboard_users(dashboard_connectors)    
+                self.process_orphaned_dashboard_users()
+        self.clean_dashboard_users(dashboard_connectors)
         dashboard_connectors.execute_actions()
         dashboard_stats.log_end(logger)
             
@@ -129,7 +137,7 @@ class RuleProcessor(object):
     
     def get_organization_info(self, organization_name):
         organization_info = self.organization_info_by_organization.get(organization_name)
-        if (organization_info == None):
+        if organization_info == None:
             self.organization_info_by_organization[organization_name] = organization_info = OrganizationInfo(organization_name)
         return organization_info
     
@@ -266,7 +274,14 @@ class RuleProcessor(object):
             if (manage_groups):
                 for user_key, desired_groups in accessor_unprocessed_groups_by_user_key.iteritems():
                     self.try_and_update_dashboard_user(accessor_organization_info, user_key, dashboard_connector, groups_to_add=desired_groups)
-                    
+
+    def iter_orphaned_dashboard_users(self):
+        owning_organization_info = self.get_organization_info(OWNING_ORGANIZATION_NAME)
+        for user_key, dashboard_user in owning_organization_info.iter_orphaned_dashboard_users():
+            if not self.is_selected_user_key(user_key):
+                continue
+            yield dashboard_user
+    
     def iter_orphaned_federated_dashboard_users(self):
         owning_organization_info = self.get_organization_info(OWNING_ORGANIZATION_NAME)
         for user_key, dashboard_user in owning_organization_info.iter_orphaned_dashboard_users():
@@ -275,6 +290,21 @@ class RuleProcessor(object):
             if (dashboard_user.get('type') != 'federatedID'):
                 continue
             yield dashboard_user
+            
+    def separate_federated_dashboard_users(self, dashboard_users):
+        '''
+        separates a list of dashboard users to a list of federated/other dashboard users
+        :type dashboard_users: list(dict)
+        '''
+        federated_dashboard_users = list()
+        other_dashboard_users = list()
+        for dashboard_user in dashboard_users:
+            if dashboard_user.get('type') == 'federatedID':
+                federated_dashboard_users.append(dashboard_user)
+            else:
+                other_dashboard_users.append(dashboard_user)
+        return federated_dashboard_users, other_dashboard_users
+                
             
     def is_selected_user_key(self, user_key):
         '''
@@ -294,24 +324,35 @@ class RuleProcessor(object):
         options = self.options
         remove_list_output_path = options['remove_list_output_path']
         remove_nonexistent_users = options['remove_nonexistent_users']
+        delete_list_output_path = options['delete_list_output_path']
+        delete_nonexistent_users = options['delete_nonexistent_users']
         
         max_deletions_per_run = options['max_deletions_per_run']
         max_missing_users = options['max_missing_users']
 
-        orphaned_federated_dashboard_users = list(self.iter_orphaned_federated_dashboard_users())
-        self.logger.info('Federated orphaned users to be removed: %s', [self.get_dashboard_user_key(dashboard_user) for dashboard_user in orphaned_federated_dashboard_users])        
+        if self.need_to_process_remove_users:
+            orphaned_dashboard_users = list(self.iter_orphaned_federated_dashboard_users())
+            self.logger.info('Federated orphaned users to be removed: %s', [self.get_dashboard_user_key(dashboard_user) for dashboard_user in orphaned_dashboard_users])        
+        elif self.need_to_process_delete_users:
+            orphaned_dashboard_users = list(self.iter_orphaned_dashboard_users())
+            self.logger.info('Orphaned users to be deleted: %s', [self.get_dashboard_user_key(dashboard_user) for dashboard_user in orphaned_dashboard_users])        
+        else:
+            raise user_sync.error.AssertionException('User operation type invalid.')
         
-        number_of_orphaned_dashboard_users = len(orphaned_federated_dashboard_users)
+        number_of_orphaned_dashboard_users = len(orphaned_dashboard_users)
 
         if (remove_list_output_path != None):
             self.logger.info('Writing remove list to: %s', remove_list_output_path)
-            self.write_remove_list(remove_list_output_path, orphaned_federated_dashboard_users)
-        elif (remove_nonexistent_users):
+            self.write_remove_list(remove_list_output_path, orphaned_dashboard_users)
+        elif (delete_list_output_path != None):
+            self.logger.info('Writing delete list to: %s', delete_list_output_path)
+            self.write_remove_list(delete_list_output_path, orphaned_dashboard_users, True)
+        elif (remove_nonexistent_users or delete_nonexistent_users):
             if number_of_orphaned_dashboard_users > max_missing_users:
                 raise user_sync.error.AssertionException(
                     'Unable to process orphaned users, as number of users (%s) is larger than max_missing_users setting' % number_of_orphaned_dashboard_users)
             orphan_count = 0
-            for dashboard_user in orphaned_federated_dashboard_users:
+            for dashboard_user in orphaned_dashboard_users:
                 orphan_count += 1
                 if orphan_count > max_deletions_per_run:
                     self.logger.critical('Only processing %d of the %d orphaned users ' +
@@ -342,9 +383,11 @@ class RuleProcessor(object):
         def try_and_remove_from_org(user_key):
             total_waiting = total_waiting_by_user_key[user_key]
             if total_waiting == 0:    
-                if (not owning_organization_info.is_dashboard_users_loaded() or owning_organization_info.get_dashboard_user(user_key) != None):
+                dashboard_user = owning_organization_info.get_dashboard_user(user_key)
+                if (not owning_organization_info.is_dashboard_users_loaded() or dashboard_user != None):
                     self.logger.info('Removing user for user key: %s', user_key)
                     username, domain = self.parse_user_key(user_key)
+                    #do_delete_user = self.need_to_process_delete_users and 
                     commands = user_sync.connector.dashboard.Commands(username=username, domain=domain)
                     commands.remove_from_org()
                     dashboard_connectors.get_owning_connector().send_commands(commands)
@@ -771,7 +814,7 @@ class RuleProcessor(object):
                 result.append(user_key)
         return result
 
-    def write_remove_list(self, file_path, dashboard_users):
+    def write_remove_list(self, file_path, dashboard_users, is_delete_list=False):
         total_users = 0
         with open(file_path, 'wb') as output_file:
             delimiter = user_sync.helper.guess_delimiter_from_filename(file_path)            
@@ -782,7 +825,11 @@ class RuleProcessor(object):
                 username, domain = self.parse_user_key(user_key)
                 writer.writerow({'user': username, 'domain': domain})
                 total_users += 1
-        self.logger.info('Total users in remove list: %d', total_users)
+        
+        if is_delete_list:
+            self.logger.info('Total users in delete list: %d', total_users)
+        else:
+            self.logger.info('Total users in remove list: %d', total_users)
 
     def log_after_mapping_hook_scope(self, before_call=None, after_call=None):
         if ((before_call is None and after_call is None) or (before_call is not None and after_call is not None)):
