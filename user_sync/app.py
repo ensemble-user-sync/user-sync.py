@@ -52,7 +52,7 @@ def process_args():
                         help='main config filename. (default: "%(default)s")',
                         default=config.DEFAULT_MAIN_CONFIG_FILENAME, metavar='filename', dest='config_filename')
     parser.add_argument('--users', 
-                        help="specify the users to be considered for sync. Legal values are 'all' (the default), 'group name or names' (one or more specified AD groups), 'mapped' (all AD groups listed in configuration file), 'file f' (a specified input file).", 
+                        help="specify the users to be considered for sync. Legal values are 'all' (the default), 'group name or names' (one or more specified AD groups), 'mapped' (all groups listed in configuration file), 'file f' (a specified input file).", 
                         nargs="*", metavar=('all|file|mapped|group', 'arg1'), dest='users')
     parser.add_argument('--user-filter',
                         help='limit the selected set of users that may be examined for syncing, with the pattern being a regular expression.',
@@ -217,7 +217,7 @@ def create_config_loader_options(args):
         elif (users_action == 'mapped'):
             config_options['directory_connector_module_name'] = 'user_sync.connector.directory_ldap'
             config_options['directory_group_mapped'] = True
-        elif (users_action == 'group'):
+        elif (users_action == 'group'):            
             if (len(users_args) == 0):
                 raise user_sync.error.AssertionException('Missing groups for --users %s [groups]' % users_action)
             config_options['directory_connector_module_name'] = 'user_sync.connector.directory_ldap'
