@@ -54,6 +54,10 @@ class ConfigLoader(object):
             'manage_groups': True,
             'update_user_info': True,
             
+            'delete_user_key_list': None,
+            'delete_list_output_path': None,
+            'delete_nonexistent_users': False,
+            
             'remove_user_key_list': None,
             'remove_list_output_path': None,
             'remove_nonexistent_users': False

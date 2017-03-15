@@ -374,9 +374,10 @@ class RuleProcessor(object):
                 if (not owning_organization_info.is_dashboard_users_loaded() or dashboard_user != None):
                     self.logger.info('Removing user for user key: %s', user_key)
                     id_type, username, domain = self.parse_user_key(user_key)
+                    do_delete_user = self.need_to_process_delete_users and id_type != user_sync.identity_type.ADOBEID_IDENTITY_TYPE
                     commands = user_sync.connector.dashboard.Commands(identity_type=id_type,
                                                                       username=username, domain=domain)
-                    commands.remove_from_org()
+                    commands.remove_from_org(do_delete_user)
                     dashboard_connectors.get_owning_connector().send_commands(commands)
 
         def on_remove_groups_callback(user_key):
@@ -596,7 +597,6 @@ class RuleProcessor(object):
         :type dashboard_connector: user_sync.connector.dashboard.DashboardConnector
         :rtype: map(string, set)
         '''
-        directory_user_by_user_key = self.directory_user_by_user_key
         filtered_directory_user_by_user_key = self.filtered_directory_user_by_user_key
 
         # the way we construct the return vaue is to start with a map from all directory users

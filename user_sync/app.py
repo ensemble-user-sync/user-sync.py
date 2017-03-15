@@ -84,6 +84,9 @@ def process_args():
     parser.add_argument('--delete-list',
                         help='specifies the file containing the list of users to be removed. Users on this list are removeFromOrg\'ed on the Adobe side.',
                         metavar='input_path', dest='delete_list_input_path')
+    parser.add_argument('--remove-entitlements-list-input-path',
+                        help='specifies the file containing the list of users to be removed. Users on this list are removeFromOrg\'ed on the Adobe side.',
+                        metavar='input_path', dest='remove_entitlements_list_input_path')
     return parser.parse_args()
 
 def init_console_log():
